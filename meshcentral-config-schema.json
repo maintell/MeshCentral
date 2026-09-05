@@ -569,6 +569,11 @@
           "default": false,
           "description": "Enables agent-side, websocket per-message deflate compression. wscompression must also be true for this to work."
         },
+        "bitlockerKeyRetentionDays": {
+          "type": "integer",
+          "default": 0,
+          "description": "How many days to retain a BitLocker recovery key after the agent last read it, so a key stays available while a volume is locked or detached. Especially useful for Bitlocker To Go devices. 0 (default) disables carry-forward: only keys read in the latest scan are kept."
+        },
         "noAgentUpdate": {
           "type": "integer",
           "default": 0,
@@ -1096,6 +1101,16 @@
               "type": "integer",
               "default": 10,
               "description": "Maximum number of invalid login attempts from an IP address in the time period."
+            },
+            "blocking": {
+              "type": "string",
+              "default": "iprange",
+              "enum": [
+                "iprange",
+                "ip",
+                "username"
+              ],
+              "description": "Selects what is blocked when the invalid login limit is reached. 'iprange' (default) keeps the current behavior of blocking IPv4 /24 ranges, 'ip' blocks the exact client IP, and 'username' blocks only the login name."
             },
             "coolofftime": {
               "type": "integer",
@@ -2229,6 +2244,11 @@
                 "type": "string",
                 "default": null,
                 "description": "The filename of a image file in .png format located in meshcentral-data to display in the MeshCentral Agent installation dialog, image should be square and from 64x64 to 200x200."
+              },
+              "macosinstallerimage": {
+                "type": "string",
+                "default": null,
+                "description": "The filename of a background image file in .png format located in meshcentral-data to display in the macOS installer."
               },
               "fileName": {
                 "type": "string",
@@ -3573,6 +3593,15 @@
                     "type": "string",
                     "format": "uri",
                     "description": "Then set, the user will be redirected to this URL when hitting the logout link."
+                  },
+                  "acceptedClockSkewMs": {
+                    "type": "number",
+                    "description": "Time in milliseconds of skew acceptable between client and server when checking NotBefore and NotOnOrAfter assertion condition validity timestamps. Setting to -1 disables checking these conditions entirely.",
+                    "default": 0
+                  },
+                  "maxAssertionAgeMs": {
+                    "type": "number",
+                    "description": "Amount of time in milliseconds after which the framework considers an assertion expired. If stricter than NotOnOrAfter, this limit is used when determining if an assertion is expired."
                   }
                 },
                 "required": [

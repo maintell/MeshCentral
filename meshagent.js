@@ -98,7 +98,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
             db.Remove('si' + obj.dbNodeKey);                          // Remove system information
             db.Remove('al' + obj.dbNodeKey);                          // Remove error log last time
             if (db.RemoveSMBIOS) { db.RemoveSMBIOS(obj.dbNodeKey); }  // Remove SMBios data
-            db.RemoveAllNodeEvents(obj.dbNodeKey);                    // Remove all events for this node
+            db.RemoveAllNodeEvents(domain.id, obj.dbNodeKey);         // Remove all events for this node
             db.removeAllPowerEventsForNode(obj.dbNodeKey);            // Remove all power events for this node
 
             // Event node deletion
@@ -208,7 +208,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                                 // Clear the core
                                 obj.sendBinary(common.ShortToStr(10) + common.ShortToStr(0)); // MeshCommand_CoreModule, ask mesh agent to clear the core
                                 parent.agentStats.clearingCoreCount++;
-                                parent.parent.debug('agent', "Clearing core");
+                                parent.parent.debug('agent', "Clearing core for agent " + obj.nodeid);
                             } else {
                                 // Setup task limiter options, this system limits how many tasks can run at the same time to spread the server load.
                                 var taskLimiterOptions = { hash: meshcorehash, core: parent.parent.defaultMeshCores[corename], name: corename };
@@ -226,7 +226,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                                         delete obj.agentCoreUpdatePending;
                                         obj.sendBinary(common.ShortToStr(10) + common.ShortToStr(0) + argument.hash + argument.core.toString('binary'), function () { parent.parent.taskLimiter.completed(taskid); }); // MeshCommand_CoreModule, start core update
                                         parent.agentStats.updatingCoreCount++;
-                                        parent.parent.debug('agent', "Updating core " + argument.name);
+                                        parent.parent.debug('agent', "Updating core " + argument.name + " for agent " + obj.nodeid);
                                     } else {
                                         // This agent is probably disconnected, nothing to do.
                                         parent.parent.taskLimiter.completed(taskid);
@@ -826,7 +826,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                     db.Set(device);
 
                     // If this is a temporary device, don't log changes
-                    if (obj.agentInfo.capabilities & 0x20) { log = 0; }
+                    if ((obj.agentInfo) && (obj.agentInfo.capabilities & 0x20)) { log = 0; }
 
                     // Event the node change
                     var event = { etype: 'node', action: 'changenode', nodeid: obj.dbNodeKey, domain: domain.id, node: parent.CloneSafeNode(device) };
@@ -873,7 +873,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
         db.Set(device);
 
         // Event the new node
-        if (obj.agentInfo.capabilities & 0x20) {
+        if ((obj.agentInfo) && (obj.agentInfo.capabilities & 0x20)) {
             // This is a temporary agent, don't log.
             parent.parent.DispatchEvent(parent.CreateMeshDispatchTargets(obj.dbMeshKey, [obj.dbNodeKey]), obj, { etype: 'node', action: 'addnode', node: device, domain: domain.id, nolog: 1 });
         } else {
@@ -1224,6 +1224,12 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                         parent.routeAgentCommand(command, obj.domain.id, obj.dbNodeKey, obj.dbMeshKey);
                         break;
                     }
+                case 'software':
+                    {
+                        // Todo - save software into database for offline access but send to web clients for now
+                        parent.routeAgentCommand(command, obj.domain.id, obj.dbNodeKey, obj.dbMeshKey);
+                        break;
+                    }
                 case 'coreinfo':
                     {
                         // Sent by the agent to update agent information
@@ -1319,30 +1325,6 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                         }
                         break;
                     }
-                case 'mc1migration':
-                    {
-                        if (command.oldnodeid.length != 64) break;
-                        const oldNodeKey = 'node//' + command.oldnodeid.toLowerCase();
-                        db.Get(oldNodeKey, function (err, nodes) {
-                            if ((nodes == null) || (nodes.length != 1)) return;
-                            const node = nodes[0];
-                            if (node.meshid == obj.dbMeshKey) {
-                                // Update the device name & host
-                                const newNode = { "name": node.name };
-                                if (node.intelamt != null) { newNode.intelamt = node.intelamt; }
-                                ChangeAgentCoreInfo(newNode);
-
-                                // Delete this node including network interface information and events
-                                db.Remove(node._id);
-                                db.Remove('if' + node._id);
-
-                                // Event node deletion
-                                const change = 'Migrated device ' + node.name;
-                                parent.parent.DispatchEvent(parent.CreateMeshDispatchTargets(node.meshid, [obj.dbNodeKey]), obj, { etype: 'node', action: 'removenode', nodeid: node._id, msg: change, domain: node.domain });
-                            }
-                        });
-                        break;
-                    }
                 case 'openUrl':
                     {
                         // Sent by the agent to return the status of a open URL action.
@@ -1376,7 +1358,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                                 db.Get(obj.dbNodeKey, function (err, nodes) { // TODO: THIS IS A BIG RACE CONDITION HERE, WE NEED TO FIX THAT. If this call is made twice at the same time on the same device, data will be missed.
                                     if ((nodes == null) || (nodes.length != 1)) { delete obj.deviceChanging; return; }
                                     const device = nodes[0];
-                                    if (typeof device.name == 'string') { parent.parent.NotifyUserOfDeviceHelpRequest(domain, device.meshid, device._id, device.name, command.msgArgs[0], command.msgArgs[1]); }
+                                    if ((typeof device.name == 'string') && Array.isArray(command.msgArgs) && (command.msgArgs.length >= 2)) { parent.parent.NotifyUserOfDeviceHelpRequest(domain, device.meshid, device._id, device.name, command.msgArgs[0], command.msgArgs[1]); }
                                 });
                             }
                         }
@@ -1384,23 +1366,9 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                     }
                 case 'ping': { sendPong(); break; }
                 case 'pong': { break; }
-                case 'getScript':
-                    {
-                        // Used by the agent to get configuration scripts.
-                        if (command.type == 1) {
-                            parent.getCiraConfigurationScript(obj.dbMeshKey, function (script) {
-                                obj.send(JSON.stringify({ action: 'getScript', type: 1, script: script.toString() }));
-                            });
-                        } else if (command.type == 2) {
-                            parent.getCiraCleanupScript(function (script) {
-                                obj.send(JSON.stringify({ action: 'getScript', type: 2, script: script.toString() }));
-                            });
-                        }
-                        break;
-                    }
                 case 'diagnostic':
                     {
-                        if (typeof command.value == 'object') {
+                        if ((command.value != null) && (typeof command.value == 'object')) {
                             switch (command.value.command) {
                                 case 'register': {
                                     // Only main agent can do this
@@ -1446,7 +1414,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                         break;
                     }
                 case 'sysinfo': {
-                    if ((typeof command.data == 'object') && (typeof command.data.hash == 'string')) {
+                    if ((command.data != null) && (typeof command.data == 'object') && (typeof command.data.hash == 'string')) {
                         // Validate command.data.
                         if (common.validateObjectForMongo(command.data, 1024) == false) break;
 
@@ -1455,11 +1423,43 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                         command.data.type = 'sysinfo';
                         command.data.domain = domain.id;
                         command.data.time = Date.now();
-                        db.Set(command.data); // Update system information in the database.
 
-                        // Event the new sysinfo hash, this will notify everyone that the sysinfo document was changed
-                        var event = { etype: 'node', action: 'sysinfohash', nodeid: obj.dbNodeKey, domain: domain.id, hash: command.data.hash, nolog: 1 };
-                        parent.parent.DispatchEvent(parent.CreateMeshDispatchTargets(obj.dbMeshKey, [obj.dbNodeKey]), obj, event);
+                        // Store the document and notify viewers that the sysinfo hash changed.
+                        var saveSysInfo = function () {
+                            db.Set(command.data);
+                            // Event the new sysinfo hash, this will notify everyone that the sysinfo document was changed
+                            var event = { etype: 'node', action: 'sysinfohash', nodeid: obj.dbNodeKey, domain: domain.id, hash: command.data.hash, nolog: 1 };
+                            parent.parent.DispatchEvent(parent.CreateMeshDispatchTargets(obj.dbMeshKey, [obj.dbNodeKey]), obj, event);
+                        };
+
+                        var volumes = command.data.hardware?.windows?.volumes;
+                        if (volumes) {
+                            // BitLocker recovery keys are kept in hardware.windows.bitlocker, keyed by protector identifier
+                            // (decoupled from the drive letter, which can change). A key is retained for 'bitlockerKeyRetentionDays'
+                            // days after it was last read; 0 (default) disables carry-forward, keeping only keys read in this scan.
+                            var ttl = (parent.parent.config.settings?.bitlockerkeyretentiondays > 0) ? (parent.parent.config.settings.bitlockerkeyretentiondays * 86400000) : 0;
+                            var updateBLKeys = function (prevKeys) {
+                                var keys = {};
+                                // Carry forward keys last read within the retention window.
+                                if ((ttl > 0) && prevKeys) {
+                                    for (const id in prevKeys) { if ((command.data.time - prevKeys[id].t) <= ttl) { keys[id] = prevKeys[id]; } }
+                                }
+                                // Record keys actually read this scan (refreshes the timestamp).
+                                for (const v of Object.values(volumes)) {
+                                    if (v && v.identifier && v.recoveryPassword) { keys[v.identifier] = { rp: v.recoveryPassword, t: command.data.time }; }
+                                }
+                                command.data.hardware.windows.bitlocker = keys;
+                                saveSysInfo();
+                            };
+                            if (ttl > 0) {
+                                // Need the previous doc to carry keys forward.
+                                db.Get(command.data._id, function (err, nodes) { updateBLKeys((nodes && nodes.length > 0) ? nodes[0].hardware?.windows?.bitlocker : null); });
+                            } else {
+                                updateBLKeys(null);   // no carry-forward, no previous-doc read needed
+                            }
+                        } else {
+                            saveSysInfo();   // non-Windows
+                        }
                     }
                     break;
                 }
@@ -1473,10 +1473,11 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                 case 'sessions': {
                     // This is a list of sessions provided by the agent
                     if (obj.sessions == null) { obj.sessions = {}; }
-                    if (typeof command.value != null) {
+                    if ((command.value != null) && (typeof command.value == 'object')) {
                         if (command.type == 'kvm') { obj.sessions.kvm = command.value; }
                         else if (command.type == 'terminal') { obj.sessions.terminal = command.value; }
                         else if (command.type == 'files') { obj.sessions.files = command.value; }
+                        else if (command.type == 'registry') { obj.sessions.registry = command.value; }
                         else if (command.type == 'help') { obj.sessions.help = command.value; }
                         else if (command.type == 'tcp') { obj.sessions.tcp = command.value; }
                         else if (command.type == 'udp') { obj.sessions.udp = command.value; }
@@ -1562,6 +1563,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                     // Information includes file hash and download location URL
                     if (typeof command.name != 'string') break;
                     var info = parent.parent.meshToolsBinaries[command.name];
+                    if (info == null) break;
                     if ((command.hash != null) && (info.hash == command.hash)) return;
 
                     // To build the connection URL, if we are using a sub-domain or one with a DNS, we need to craft the URL correctly.
@@ -1631,8 +1633,9 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                     if ((typeof command.url != 'string') || (typeof command.approved != 'boolean') || (command.url.startsWith('2fa://') == false)) return;
 
                     // parse the URL
+                    // Node 22's WHATWG URL parser rejects custom schemes like 2fa://, so swap to https:// for parsing only.
                     var url = null;
-                    try { url = new URL(command.url); } catch (ex) { }
+                    try { url = new URL(command.url.replace(/^2fa:\/\//, 'https://')); } catch (ex) { }
                     if (url == null) return;
 
                     // Decode the cookie
@@ -1927,6 +1930,14 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                     if (!device.wsc) { device.wsc = {}; }
                     if (JSON.stringify(device.wsc) != JSON.stringify(command.wsc)) { /*changes.push('Windows Security Center status');*/ device.wsc = command.wsc; change = 1; log = 1; }
                 }
+                if (command.lsc != null) { // Linux Security Center
+                    if (!device.lsc) { device.lsc = {}; }
+                    if (JSON.stringify(device.lsc) != JSON.stringify(command.lsc)) { /*changes.push('Linux Security Center status');*/ device.lsc = command.lsc; change = 1; log = 1; }
+                }
+                if (command.pr != null) { // Pending Reboot
+                    if (!device.pr) { device.pr = {}; }
+                    if (JSON.stringify(device.pr) != JSON.stringify(command.pr)) { /*changes.push('Pending Reboot status');*/ device.pr = command.pr; change = 1; log = 1; }
+                }
                 if (command.defender != null) { // Defender For Windows Server
                     if (!device.defender) { device.defender = {}; }
                     if (JSON.stringify(device.defender) != JSON.stringify(command.defender)) { /*changes.push('Defender status');*/ device.defender = command.defender; change = 1; log = 1; }
@@ -1948,9 +1959,9 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                     parent.removePmtFromAllOtherNodes(device); // We need to make sure to remove this push messaging token from any other device on this server, all domains included.
                 }
                 
-                if ((command.users != null) && (Array.isArray(command.users)) && (device.users != command.users)) { device.users = command.users; change = 1; } // Don't save this to the db.
+                if ((command.users != null) && (common.validateStrArray(command.users)) && (device.users != command.users)) { device.users = command.users; change = 1; } // Don't save this to the db.
                 if ((command.lusers != null) && (Array.isArray(command.lusers)) && (device.lusers != command.lusers)) { device.lusers = command.lusers; change = 1; } // Don't save this to the db.
-                if ((command.upnusers != null) && (Array.isArray(command.upnusers)) && (device.upnusers != command.upnusers)) { device.upnusers = command.upnusers; change = 1; } // Don't save this to the db.
+                if ((command.upnusers != null) && (common.validateStrArray(command.upnusers)) && (device.upnusers != command.upnusers)) { device.upnusers = command.upnusers; change = 1; } // Don't save this to the db.
                 if ((mesh.mtype == 2) && (!args.wanonly)) {
                     // In WAN mode, the hostname of a computer is not important. Don't log hostname changes.
                     if (device.host != obj.remoteaddr) { device.host = obj.remoteaddr; change = 1; changes.push('host'); }
@@ -2022,7 +2033,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
 
                     // Event the node change
                     var event = { etype: 'node', action: 'changenode', nodeid: obj.dbNodeKey, domain: domain.id, node: parent.CloneSafeNode(device), msgid: 59, msgArgs: [device.name, mesh.name, changes.join(', ')], msg: 'Changed device ' + device.name + ' from group ' + mesh.name + ': ' + changes.join(', ') };
-                    if (obj.agentInfo.capabilities & 0x20) { event.nolog = 1; } // If this is a temporary device, don't log changes
+                    if ((obj.agentInfo) && (obj.agentInfo.capabilities & 0x20)) { event.nolog = 1; } // If this is a temporary device, don't log changes
                     if (db.changeStream) { event.noact = 1; } // If DB change stream is active, don't use this event to change the node. Another event will come.
                     parent.parent.DispatchEvent(parent.CreateMeshDispatchTargets(device.meshid, [obj.dbNodeKey]), obj, event);
                 }
@@ -2131,7 +2142,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
     // Return 0 is no update needed, 1 update using native system, 2 update using meshcore system
     function compareAgentBinaryHash(agentExeInfo, agentHash) {
         // If this is a temporary agent and the server is set to not update temporary agents, don't update the agent.
-        if ((obj.agentInfo.capabilities & 0x20) && (args.temporaryagentupdate === false)) return 0;
+        if ((obj.agentInfo) && (obj.agentInfo.capabilities & 0x20) && (args.temporaryagentupdate === false)) return 0;
         // If we are testing the agent update system, always return true
         if ((args.agentupdatetest === true) || (args.agentupdatetest === 1)) return 1;
         if (args.agentupdatetest === 2) return 2;

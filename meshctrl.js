@@ -14,9 +14,10 @@ try { require('ws'); } catch (ex) { console.log('Missing module "ws", type "npm 
 
 var settings = {};
 const crypto = require('crypto');
+const RUNCOMMAND_RESPONSE_ID = crypto.randomUUID(); // unique per process, see PR description: avoids concurrent 'runcommand' invocations under the same login cross-talking on each other's --reply output
 const args = require('minimist')(process.argv.slice(2));
 const path = require('path');
-const possibleCommands = ['edituser', 'listusers', 'listusersessions', 'listdevicegroups', 'listdevices', 'listusersofdevicegroup', 'listevents', 'logintokens', 'serverinfo', 'userinfo', 'adduser', 'removeuser', 'adddevicegroup', 'removedevicegroup', 'editdevicegroup', 'broadcast', 'showevents', 'addusertodevicegroup', 'removeuserfromdevicegroup', 'addusertodevice', 'removeuserfromdevice', 'sendinviteemail', 'generateinvitelink', 'config', 'movetodevicegroup', 'deviceinfo', 'removedevice', 'editdevice', 'addlocaldevice', 'addamtdevice', 'addusergroup', 'listusergroups', 'removeusergroup', 'runcommand', 'shell', 'upload', 'download', 'deviceopenurl', 'devicemessage', 'devicetoast', 'addtousergroup', 'removefromusergroup', 'removeallusersfromusergroup', 'devicesharing', 'devicepower', 'indexagenterrorlog', 'agentdownload', 'report', 'grouptoast', 'groupmessage', 'webrelay'];
+const possibleCommands = ['edituser', 'listusers', 'listusersessions', 'listdevicegroups', 'listdevices', 'listusersofdevicegroup', 'listevents', 'logintokens', 'serverinfo', 'serverversion', 'userinfo', 'adduser', 'removeuser', 'adddevicegroup', 'removedevicegroup', 'editdevicegroup', 'broadcast', 'showevents', 'addusertodevicegroup', 'removeuserfromdevicegroup', 'addusertodevice', 'removeuserfromdevice', 'sendinviteemail', 'generateinvitelink', 'config', 'movetodevicegroup', 'deviceinfo', 'removedevice', 'editdevice', 'addlocaldevice', 'addamtdevice', 'addusergroup', 'listusergroups', 'removeusergroup', 'runcommand', 'shell', 'upload', 'download', 'deviceopenurl', 'devicemessage', 'devicetoast', 'addtousergroup', 'removefromusergroup', 'removeallusersfromusergroup', 'devicesharing', 'devicepower', 'indexagenterrorlog', 'agentdownload', 'report', 'grouptoast', 'groupmessage', 'webrelay'];
 if (args.proxy != null) { try { require('https-proxy-agent'); } catch (ex) { console.log('Missing module "https-proxy-agent", type "npm install https-proxy-agent" to install it.'); return; } }
 
 if (args['_'].length == 0) {
@@ -26,6 +27,7 @@ if (args['_'].length == 0) {
     console.log("Supported actions:");
     console.log("  Help [action]               - Get help on an action.");
     console.log("  ServerInfo                  - Show server information.");
+    console.log("  ServerVersion               - Show server version.");
     console.log("  UserInfo                    - Show user information.");
     console.log("  ListUsers                   - List user accounts.");
     console.log("  ListUserSessions            - List online users.");
@@ -96,6 +98,7 @@ if (args['_'].length == 0) {
         case 'config': { performConfigOperations(args); return; }
         case 'indexagenterrorlog': { indexAgentErrorLog(); return; }
         case 'serverinfo': { ok = true; break; }
+        case 'serverversion': { ok = true; break; }
         case 'userinfo': { ok = true; break; }
         case 'listusers': { ok = true; break; }
         case 'listusersessions': { ok = true; break; }
@@ -378,6 +381,14 @@ if (args['_'].length == 0) {
                         console.log("  --json                 - Show result as JSON.");
                         break;
                     }
+                    case 'serverversion': {
+                        console.log("Get the version of the MeshCentral server, Example usages:\r\n");
+                        console.log("  MeshCtrl ServerVersion --loginuser myaccountname --loginpass mypassword");
+                        console.log("  MeshCtrl ServerVersion --loginuser myaccountname --loginkeyfile key.txt");
+                        console.log("\r\nOptional arguments:\r\n");
+                        console.log("  --json                 - Show result as JSON.");
+                        break;
+                    }
                     case 'userinfo': {
                         console.log("Get account information for the login account, Example usages:\r\n");
                         console.log("  MeshCtrl UserInfo --loginuser myaccountname --loginpass mypassword");
@@ -578,7 +589,8 @@ if (args['_'].length == 0) {
                         console.log("       4096 = Desktop Limited Input         8192 = Limit Events           ");
                         console.log("      16384 = Chat / Notify                32768 = Uninstall Agent        ");
                         console.log("      65536 = No Remote Desktop           131072 = Remote Commands        ");
-                        console.log("     262144 = Reset / Power off      ");
+                        console.log("     262144 = Reset / Power off          4194304 = No Registry            ");
+                        console.log("    8388608 = No Software                                                 ");
                         break;
                     }
                     case 'removefromusergroup': {
@@ -714,6 +726,8 @@ if (args['_'].length == 0) {
                         console.log("  --limiteddesktop       - Limit remote desktop keys.");
                         console.log("  --noterminal           - Hide the terminal tab from this user.");
                         console.log("  --nofiles              - Hide the files tab from this user.");
+                        console.log("  --noregistry           - Hide the registry tab from this user.");
+                        console.log("  --nosoftware           - Hide the software tab from this user.");
                         console.log("  --noamt                - Hide the Intel AMT tab from this user.");
                         console.log("  --limitedevents        - User can only see his own events.");
                         console.log("  --chatnotify           - Allow chat and notification options.");
@@ -760,6 +774,8 @@ if (args['_'].length == 0) {
                         console.log("  --limiteddesktop       - Limit remote desktop keys.");
                         console.log("  --noterminal           - Hide the terminal tab from this user.");
                         console.log("  --nofiles              - Hide the files tab from this user.");
+                        console.log("  --noregistry           - Hide the registry tab from this user.");
+                        console.log("  --nosoftware           - Hide the software tab from this user.");
                         console.log("  --noamt                - Hide the Intel AMT tab from this user.");
                         console.log("  --limitedevents        - User can only see his own events.");
                         console.log("  --chatnotify           - Allow chat and notification options.");
@@ -1379,6 +1395,7 @@ function serverConnect() {
         //console.log('Connected.');
         switch (settings.cmd) {
             case 'serverinfo': { break; }
+            case 'serverversion': { ws.send(JSON.stringify({ action: 'serverversion', responseid: 'meshctrl' })); break; }
             case 'userinfo': { break; }
             case 'listusers': { ws.send(JSON.stringify({ action: 'users', responseid: 'meshctrl' })); break; }
             case 'listusersessions': { ws.send(JSON.stringify({ action: 'wssessioncount', responseid: 'meshctrl' })); break; }
@@ -1654,6 +1671,8 @@ function serverConnect() {
                 if (args.desktopviewonly) { meshrights |= 256; }
                 if (args.noterminal) { meshrights |= 512; }
                 if (args.nofiles) { meshrights |= 1024; }
+                if (args.noregistry) { meshrights |= 4194304; }
+                if (args.nosoftware) { meshrights |= 8388608; }
                 if (args.noamt) { meshrights |= 2048; }
                 if (args.limiteddesktop) { meshrights |= 4096; }
                 if (args.limitedevents) { meshrights |= 8192; }
@@ -1681,6 +1700,8 @@ function serverConnect() {
                 if (args.desktopviewonly) { meshrights |= 256; }
                 if (args.noterminal) { meshrights |= 512; }
                 if (args.nofiles) { meshrights |= 1024; }
+                if (args.noregistry) { meshrights |= 4194304; }
+                if (args.nosoftware) { meshrights |= 8388608; }
                 if (args.noamt) { meshrights |= 2048; }
                 if (args.limiteddesktop) { meshrights |= 4096; }
                 if (args.limitedevents) { meshrights |= 8192; }
@@ -1755,7 +1776,7 @@ function serverConnect() {
                 if (args.runasuser) { runAsUser = 1; } else if (args.runasuseronly) { runAsUser = 2; }
                 var reply = false;
                 if (args.reply) { reply = true; }
-                ws.send(JSON.stringify({ action: 'runcommands', nodeids: [args.id], type: ((args.powershell) ? 2 : 0), cmds: args.run, responseid: 'meshctrl', runAsUser: runAsUser, reply: reply }));
+                ws.send(JSON.stringify({ action: 'runcommands', nodeids: [args.id], type: ((args.powershell) ? 2 : 0), cmds: args.run, responseid: RUNCOMMAND_RESPONSE_ID, runAsUser: runAsUser, reply: reply }));
                 break;
             }
             case 'shell':
@@ -2088,6 +2109,23 @@ function serverConnect() {
                 }
                 break;
             }
+            case 'serverversion': { // SERVERVERSION
+                if (settings.cmd == 'serverversion') {
+                    if (data.responseid == 'meshctrl') {
+                        if (data.result != 'OK') { console.log(data.result); process.exit(); }
+                        if (args.json) {
+                            console.log(JSON.stringify(data.tags, null, 2));
+                        } else {
+                            var svmsg = 'MeshCentral version: ' + data.tags.current;
+                            if (typeof data.tags.latest == 'string') { svmsg += ' (latest: ' + data.tags.latest + ')'; }
+                            if (typeof data.tags.stable == 'string') { svmsg += ' (stable: ' + data.tags.stable + ')'; }
+                            console.log(svmsg);
+                        }
+                        process.exit();
+                    }
+                }
+                break;
+            }
             case 'events': {
                 if (settings.cmd == 'listevents') {
                     if (args.raw) {
@@ -2259,7 +2297,7 @@ function serverConnect() {
                 if (((settings.cmd == 'shell') || (settings.cmd == 'upload') || (settings.cmd == 'download')) && (data.result == 'OK')) return;
                 if ((data.type == 'runcommands') && (settings.cmd != 'runcommand')) return;
                 if ((settings.multiresponse != null) && (settings.multiresponse > 1)) { settings.multiresponse--; break; }
-                if (data.responseid == 'meshctrl') {
+                if ((data.responseid == 'meshctrl') || (data.responseid == RUNCOMMAND_RESPONSE_ID)) {
                     if (data.meshid) { console.log(data.result, data.meshid); }
                     else if (data.userid) { console.log(data.result, data.userid); }
                     else console.log(data.result);
@@ -2600,6 +2638,10 @@ function serverConnect() {
                             console.log('Invalid login.');
                         }
                     }
+                } else if (data.cause == 'locked') {
+                    console.log('Account locked. Please contact the administrator.');
+                } else if (data.cause == 'banned') {
+                    console.log('Access temporarily blocked due to too many failed login attempts.');
                 }
                 process.exit();
                 break;
@@ -2976,7 +3018,7 @@ function displayDeviceInfo(sysinfo, lastconnect, network, nodes) {
     if (node.desc != null) { output["Description"] = node.desc; outputCount++; }
     if (node.icon != null) { output["Icon"] = node.icon; outputCount++; }
     if (node.tags) { output["Tags"] = node.tags; outputCount++; }
-    if (node.av) {
+    if (node.av && node.av.length > 0) {
         var av = [];
         for (var i in node.av) {
             if (typeof node.av[i]['product'] == 'string') {
@@ -2990,19 +3032,36 @@ function displayDeviceInfo(sysinfo, lastconnect, network, nodes) {
         }
         output["AntiVirus"] = av; outputCount++;
     }
+    // Defender for Windows Server
+    if(typeof node.defender == 'object') {
+        output["Windows Defender"] = node.defender; outputCount++; 
+    }
+    if (node.pr && node.pr.length > 0) {
+        var pr = [];
+        for (var i in node.pr) { pr.push(node.pr[i]); }
+        output["Pending Reboot"] = pr; outputCount++;
+    }            
     if (typeof node.wsc == 'object') {
-        output["WindowsSecurityCenter"] = node.wsc; outputCount++;
+        output["Windows Security Center"] = node.wsc; outputCount++;
+    }
+    if (typeof node.lsc == 'object') {
+        output["Linux Security Center"] = node.lsc; outputCount++;
     }
     if (outputCount > 0) { info["General"] = output; }
 
     // Operating System
     var hardware = null;
     if ((sysinfo != null) && (sysinfo.hardware != null)) { hardware = sysinfo.hardware; }
-    if ((hardware && hardware.windows && hardware.windows.osinfo) || node.osdesc) {
+    if ((hardware && hardware.windows && hardware.windows.osinfo) || (hardware && hardware.linux) || node.osdesc) {
         var output = {}, outputCount = 0;
         if (node.rname) { output["Name"] = node.rname; outputCount++; }
         if (node.osdesc) { output["Version"] = node.osdesc; outputCount++; }
         if (hardware && hardware.windows && hardware.windows.osinfo) { var m = hardware.windows.osinfo; if (m.OSArchitecture) { output["Architecture"] = m.OSArchitecture; outputCount++; } }
+        if (hardware && hardware.linux) {
+            if (hardware.linux.arch) { output["Architecture"] = hardware.linux.arch; outputCount++; }
+            if (hardware.linux.kernel_release) { output["Kernel Release"] = hardware.linux.kernel_release; outputCount++; }
+            if (hardware.linux.kernel_build) { output["Kernel Build"] = hardware.linux.kernel_build; outputCount++; }
+        }
         if (outputCount > 0) { info["Operating System"] = output; }
     }
 
@@ -3197,6 +3256,12 @@ function displayDeviceInfo(sysinfo, lastconnect, network, nodes) {
                 }
             }
         }
+    
+        // Windows volumes
+        if ((hardware?.windows?.volumes)) { info["Volumes"] = hardware.windows.volumes; }
+    
+        // Bitlocker cache
+        if ((hardware?.windows?.bitlocker)) { info["Bitlocker cache"] = hardware.windows.bitlocker; }
     }
 
     // Display everything
